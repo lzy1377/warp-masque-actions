@@ -1,4 +1,4 @@
-name = "opera-masque"
+name = "warp-masque-actions"
 main = "src/index.js"
 compatibility_date = "2026-09-01"
 # getSetCookie() 需要，缺了 Opera 的会话维持不住
