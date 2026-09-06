@@ -25,6 +25,21 @@ const t = (n, c) => { c ? (pass++, console.log("  ✓", n)) : (fail++, console.l
   t("缺 geo 字段回落请求码 EU", b.tag === "欧洲1" && b.loc === "欧洲" && b.host === "eu0.sec-tunnel.com");
 }
 
+// landingsFromDisco: ports 数组取首项，ports 缺失回落 x.port / 443
+{
+  const ls = landingsFromDisco(
+    { return_code: { "0": "OK" }, data: { ips: [
+      { ip: "1.1.1.1", ports: [443, 8080], geo: { country_code: "EU" } },
+      { ip: "2.2.2.2", port: 2255, geo: { country_code: "EU" } },
+      { ip: "3.3.3.3", geo: { country_code: "EU" } },
+    ] } },
+    "EU", {},
+  );
+  t("ports 数组取首项", ls[0].port === 443);
+  t("ports 缺、有 x.port 取 x.port", ls[1].port === 2255);
+  t("两者都缺回落 443", ls[2].port === 443);
+}
+
 // counters 跨区共享序号，tag/SNI 不打架
 {
   const disc1 = { return_code: { "0": "OK" }, data: { ips: [{ ip: "1.1.1.1", geo: { country_code: "AS" }, ports: [443] }] } };

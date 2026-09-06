@@ -20,6 +20,11 @@ const H = {
 
 export const REGIONS = { AS: "亚洲", EU: "欧洲", AM: "美洲" };
 
+/** discover 的 requested_geo 对齐社区格式 `"XX",,`——裸码会命中服务端
+ *  AM 回退池，导致"亚洲组挂欧美 IP"。反引号在 URLSearchParams 编码里
+ *  会被原样传递，服务端能认到。 */
+const geoParam = (code) => `"${code}",,`;
+
 /** 服务端顶层错误字段 return_code 判断："0" 键=成功，其他键=错误码。
  *  注意是对象 {"0":"OK"}，不是裸字符串/数字；个别情况下可能是数字 0。
  *  没有该字段时不拦（兼容未知响应）。 */
@@ -56,7 +61,7 @@ export function landingsFromDisco(disc, reqCode, counters) {
       tag: `${loc}${seq}`,
       loc,
       ip: x.ip,
-      port: (x.port && x.port[0]) || 443,
+      port: x.ports?.[0] ?? x.port ?? 443,
       host: `${cc.toLowerCase()}${seq - 1}.sec-tunnel.com`,
     });
   }
