@@ -75,7 +75,11 @@ async function rebuild(env, { forceWarp = false } = {}) {
   const state = {
     updatedAt: new Date(now).toISOString(),
     expiresAt: new Date(now + TTL_MS).toISOString(),
-    stats: { entries, landings, combos },
+    stats: {
+      entries, landings, combos,
+      // 各请求码 discover 成功/数量（0 = 该区失败），排查"某区没产出 IP"用
+      ...(opera.perRegion || {}),
+    },
     warp: {
       deviceId: warp.deviceId,
       ipv4: warp.ipv4,

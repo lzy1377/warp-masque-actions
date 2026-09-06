@@ -20,6 +20,49 @@ const H = {
 
 export const REGIONS = { AS: "亚洲", EU: "欧洲", AM: "美洲" };
 
+/** 服务端顶层错误字段 return_code 判断："0" 键=成功，其他键=错误码。
+ *  注意是对象 {"0":"OK"}，不是裸字符串/数字；个别情况下可能是数字 0。
+ *  没有该字段时不拦（兼容未知响应）。 */
+function returnCodeOk(rc) {
+  if (rc == null) return true;
+  if (typeof rc === "number") return rc === 0;
+  if (typeof rc === "string") return rc === "0";
+  if (typeof rc === "object") return Object.prototype.hasOwnProperty.call(rc, "0");
+  return true;
+}
+
+/** discover 响应里一台落地服务器的真实区码。拿不到就当没有。 */
+export function landingGeo(x) {
+  return x && x.geo && typeof x.geo.country_code === "string"
+    ? x.geo.country_code.toUpperCase()
+    : "";
+}
+
+/** 把某区 discover 响应转成落地条目。真实区码以响应 geo.country_code 为准：
+ *  空/缺字段才回落请求码，避免"亚洲组挂欧美 IP"那种错配。
+ *  counters 按真实区码累计序号（跨区共享），tag/SNI 才不打架。 */
+export function landingsFromDisco(disc, reqCode, counters) {
+  const out = [];
+  // 只在成功响应（return_code 有 "0" 键）且 ips 存在时取值；
+  // 非 0 错误（如 801）或缺 ips 一律产出 0 条
+  const rc = disc && disc.return_code;
+  if (rc == null || !returnCodeOk(rc)) return out;
+  const ips = (disc && disc.data && disc.data.ips) || [];
+  for (const x of ips) {
+    const cc = landingGeo(x) || reqCode;
+    const loc = REGIONS[cc] || REGIONS[reqCode];
+    const seq = (counters[cc] = (counters[cc] || 0) + 1);
+    out.push({
+      tag: `${loc}${seq}`,
+      loc,
+      ip: x.ip,
+      port: (x.port && x.port[0]) || 443,
+      host: `${cc.toLowerCase()}${seq - 1}.sec-tunnel.com`,
+    });
+  }
+  return out;
+}
+
 /** Digest 的 H()。服务端目前用 SHA-256，老实现是 MD5，两个都支持。 */
 async function digestHash(algo, s) {
   if (/^md5$/i.test(algo)) return md5Hex(s);
@@ -83,8 +126,18 @@ class Session {
     this._absorb(r);
     if (!r.ok) throw new Error(`${path} HTTP ${r.status}`);
     const j = await r.json();
-    if (j.status && j.status.code !== 0) {
-      throw new Error(`${path} code=${j.status.code} ${j.status.message || ""}`);
+    // 服务端顶层错误字段是 return_code：`{"0":"OK"}` 成功，非 0 键失败
+    // （实测 801 = "No Available Proxies for Region"）。不存在 status 字段，
+    // 老的判断永远不触发，属于白写。discover 的非 0 错误按整区失败处理，
+    // 此处不抛，由调用方看 return_code 决定跳过。
+    if (path === "discover" && j?.return_code && !returnCodeOk(j.return_code)) {
+      return j;
+    }
+    if (!returnCodeOk(j?.return_code)) {
+      const code = j && j.return_code && typeof j.return_code === "object"
+        ? Object.keys(j.return_code)[0]
+        : JSON.stringify(j?.return_code);
+      throw new Error(`${path} return_code=${code}`);
     }
     return j;
   }
@@ -109,26 +162,31 @@ export async function fetchOpera() {
   const gp = await s.rpc("device_generate_password", { device_id: deviceId });
   const password = gp.data.device_password;
 
+  const byReq = {};   // 分请求码统计，给 state:meta 排查用
   const landings = [];
-  for (const [code, loc] of Object.entries(REGIONS)) {
+  const counters = {};
+  for (const [reqCode] of Object.entries(REGIONS)) {
     let disc;
+    let failed = false;
     try {
-      disc = await s.rpc("discover", { serial_no: idHash, requested_geo: code });
+      // 对齐社区格式 `"XX",,`，裸码会命中服务端 AM 回退池
+      disc = await s.rpc("discover", { serial_no: idHash, requested_geo: geoParam(reqCode) });
     } catch {
-      continue;   // 某个区拿不到就跳过，不影响其他区
+      failed = true;    // 传输/解析层失败：该区记 0
     }
-    let seq = 0;
-    for (const x of disc.data.ips || []) {
-      seq += 1;
-      landings.push({
-        tag: `${loc}${seq}`,
-        loc,
-        ip: x.ip,
-        port: (x.port && x.port[0]) || 443,
-        host: `${code.toLowerCase()}${seq - 1}.sec-tunnel.com`,
-      });
+    if (failed || !returnCodeOk(disc?.return_code)) {
+      // 该区没有可用落地（如 801）或请求失败：跳过，不影响其他区
+      byReq[reqCode] = 0;
+      continue;
     }
+    const ips = (disc.data && disc.data.ips) || [];
+    byReq[reqCode] = ips.length;
+    landings.push(...landingsFromDisco(disc, reqCode, counters));
   }
 
-  return { username: idHash, password, landings, fetchedAt: new Date().toISOString() };
+  return {
+    username: idHash, password, landings,
+    perRegion: byReq,               // 各请求码 discover 成功/数量（0 = 失败）
+    fetchedAt: new Date().toISOString(),
+  };
 }
