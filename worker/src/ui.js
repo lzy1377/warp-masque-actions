@@ -211,6 +211,12 @@ export function renderUI(state, host, sp, token, cred) {
   const fmt = (d) => d ? d.toISOString().replace("T", " ").slice(0, 19) + " UTC" : "—";
   const sub = `https://${host}${sp}?token=${token}`;
 
+  // 每个请求码的 discover 数量照抄进格子，0 或缺省表示"该区本次没拿到"
+  const entriesTxt = ["AS", "EU", "AM"]
+    .filter((c) => stat[c] !== undefined)
+    .map((c) => `${c}:${stat[c]}`)
+    .join("  ");
+
   const row = (k, v, cls = "") =>
     `<div class="row"><span class="k">${k}</span><span class="v ${cls}">${v}</span></div>`;
 
@@ -317,6 +323,7 @@ export function renderUI(state, host, sp, token, cred) {
         <div class="cell"><div class="n">${stat.entries ?? "—"}</div><div class="l">MASQUE 接入点</div></div>
         <div class="cell"><div class="n">${stat.landings ?? "—"}</div><div class="l">Opera 落地</div></div>
         <div class="cell"><div class="n">${stat.entries ?? "—"}</div><div class="l">WARP 直连</div></div>
+        <div class="cell"><div class="n">${entriesTxt || "—"}</div><div class="l">落地分布(区:数量)</div></div>
       </div>
       <div class="note">
         每个落地和每个接入点都组合一遍，任一环失效都还有别的路走。<br>

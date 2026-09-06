@@ -31,6 +31,31 @@ SNI_NODE = ("162.159.198.1", 443)
 # Opera VPN 只有三个大区，没有国家级选项
 REGIONS = {"AS": "亚洲", "EU": "欧洲", "AM": "美洲"}
 
+# opera-proxy -list-proxies 输出行形如 "eu0.sec-tunnel.com,1.2.3.4,443"，
+# host 的前缀 as/eu/am 就是这台落地的真实区。无法识别前缀时返回 None，
+# 由调用方回落到请求码 —— 镜像 worker 版"以响应真实区码为准"的修法，
+# 避免二进制回退到 AM 默认池时"亚洲组挂欧美 IP"的错配。
+def host_region(host):
+    m = re.match(r"^(as|eu|am)\d*\.sec-tunnel\.com$", host, re.I)
+    return m.group(1).upper() if m else None
+
+
+def parse_line(line, req_code, counters):
+    """解析 opera-proxy 输出的一行，返回落地 dict；匹配不上返回 None。
+
+    真实区码以返回 host 的前缀为准，空/无法识别才回落请求码。
+    counters 按真实区码共享序号（跨区累计），tag/SNI 才不会打架。
+    """
+    m = re.match(r"^([\w.-]+\.sec-tunnel\.com),([\d.]+),(\d+)$", line.strip())
+    if not m:
+        return None
+    host, ip, port = m.groups()
+    cc = host_region(host) or req_code
+    loc = REGIONS.get(cc) or REGIONS[req_code]
+    seq = counters[cc] = counters.get(cc, 0) + 1
+    return {"loc": loc, "tag": f"{loc}{seq}", "host": host,
+            "ip": ip, "port": int(port), "cc": cc}
+
 RS = "https://raw.githubusercontent.com"
 RULESETS = [
     ("🎯 全球直连", f"{RS}/cmliu/ACL4SSR/refs/heads/main/Clash/CFnat.list"),
@@ -97,6 +122,7 @@ def masque_node(name, ip, port, priv, pub, v4, v6, sni=None):
 def opera_landings(binary):
     """跑 opera-proxy 拿匿名凭据和落地服务器清单。"""
     out = []
+    counters = {}
     for code, loc in REGIONS.items():
         r = subprocess.run([binary, "-country", code, "-list-proxies"],
                            capture_output=True, text=True, timeout=180)
@@ -107,15 +133,14 @@ def opera_landings(binary):
             continue
         seq = 0
         for line in r.stdout.splitlines():
-            m = re.match(r"^([\w.-]+\.sec-tunnel\.com),([\d.]+),(\d+)$",
-                         line.strip())
-            if not m:
+            h = parse_line(line, code, counters)
+            if not h:
                 continue
-            host, ip, port = m.groups()
             seq += 1
-            out.append({"loc": loc, "tag": f"{loc}{seq}", "host": host,
-                        "ip": ip, "port": int(port),
-                        "user": login.group(1), "pw": pw.group(1)})
+            h["user"] = login.group(1)
+            h["pw"] = pw.group(1)
+            out.append(h)
+        print(f"{code} 区找到 {seq} 个落地", file=sys.stderr)
     return out
 
 
