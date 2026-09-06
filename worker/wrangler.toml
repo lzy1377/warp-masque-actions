@@ -8,4 +8,4 @@ compatibility_flags = ["nodejs_compat"]
 #   npx wrangler kv namespace create KV
 [[kv_namespaces]]
 binding = "KV"
-id = "在这里填你的 KV namespace id"
+id = "57bda7d2f1ec45f193abe67430f1fff5"
