@@ -43,7 +43,25 @@ t("节点选择含地区线路", sel.includes("亚洲线路"));
 // 组合节点必须带 dialer-proxy，直连节点必须不带
 t("组合节点都带 dialer-proxy",
   (yaml.match(/dialer-proxy:/g) || []).length === combos);
-t("组合节点名格式正确", proxyNames.every((n) => /^[\u4e00-\u9fa5]+\d+@/.test(n)));
+// 套娃名 {tag}@{short}：接入点标识不带 WARP 前缀
+t("组合节点名格式正确", proxyNames.every((n) => /^[一-龥]+\d+@(?!WARP)/.test(n)));
+t("套娃名不带 WARP 前缀",
+  proxyNames.every((n) => !/@WARP/.test(n)) &&
+  proxyNames.some((n) => n.endsWith("@198.1-443")) &&
+  proxyNames.some((n) => n.endsWith("@v6-103-1-443")));
+// 实际 WARP 节点(masque outbound)必须带前缀，官方域名节点也要
+t("实际 WARP 节点名带 WARP 前缀",
+  entryNames.every((n) => n.startsWith("WARP") && n.includes("-")) &&
+  entryNames.includes("WARP-官方域名"));
+// 套娃名与 dialer-proxy 引用一致：接入点标识去掉前缀 = 节点名，dialer-proxy 指向带前缀名
+t("套娃名与 dialer-proxy 引用一致",
+  proxyNames.every((n) => {
+    const m = n.match(/^[一-龥]+\d+@(.+)$/);
+    const short = m && m[1];
+    if (!short) return false;
+    const long = short.startsWith("v6-") ? "WARP6-" + short.slice(3) : "WARP-" + short;
+    return yaml.includes(`dialer-proxy: ${long}}`);
+  }));
 
 // 不能有悬空引用
 const groupSection = yaml.slice(yaml.indexOf("proxy-groups:"), yaml.indexOf("rule-providers:"));
