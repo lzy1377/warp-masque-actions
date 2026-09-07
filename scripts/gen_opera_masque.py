@@ -93,7 +93,20 @@ def pem_to_b64der(pem):
 
 
 def entry_name(ip, port):
-    """接入点名字，短一些，后面要拼进组合节点名。"""
+    """接入点名，带 WARP 前缀，对齐 gen_masque.py 的 node_name。"""
+    if ":" in ip:
+        seg = ip.split(":")[2]
+        tail = ip.rsplit(":", 1)[-1]
+        return f"WARP6-{seg}-{tail}-{port}"
+    return f"WARP-{'.'.join(ip.split('.')[2:])}-{port}"
+
+
+def entry_short_name(ip, port):
+    """套娃节点名里展示的接入点标识，不带 WARP 前缀。
+
+    masque outbound 用 entry_name 的带前缀名，dialer-proxy 指向它；
+    套娃名 {tag}@{short} 拆开用旧格式，用户才分得清哪条是真正的 WARP 节点。
+    """
     if ":" in ip:
         seg = ip.split(":")[2]
         tail = ip.rsplit(":", 1)[-1]
@@ -152,21 +165,23 @@ def build(cfg, landings):
     v4, v6 = cfg["ipv4"], cfg["ipv6"]
 
     # 1. 全部 MASQUE 接入点
-    entries, proxies = [], []
+    entries, shorts, proxies = [], [], []
     for ip in V4 + V6:
         for port in PORTS:
             n = entry_name(ip, port)
             entries.append(n)
+            shorts.append(entry_short_name(ip, port))
             proxies.append(masque_node(n, ip, port, priv, pub, v4, v6))
-    entries.append("官方域名")
-    proxies.append(masque_node("官方域名", SNI_NODE[0], SNI_NODE[1],
+    entries.append("WARP-官方域名")
+    shorts.append("官方域名")
+    proxies.append(masque_node("WARP-官方域名", SNI_NODE[0], SNI_NODE[1],
                                priv, pub, v4, v6, OFFICIAL_SNI))
 
     # 2. 落地 × 接入点 全组合
     by_loc = {}
     for land in landings:
-        for ent in entries:
-            name = f"{land['tag']}@{ent}"
+        for ent, short in zip(entries, shorts):
+            name = f"{land['tag']}@{short}"
             by_loc.setdefault(land["loc"], []).append(name)
             proxies.append(
                 f'  - {{name: "{name}", type: http, server: {land["ip"]}, '
@@ -209,7 +224,7 @@ def build(cfg, landings):
 # 由 GitHub Actions 自动生成，请勿手工编辑
 #
 # 链路: 本机 -> MASQUE 接入点 -> Opera 落地 -> 目标
-# 节点名 "欧洲1@198.1-443" = 欧洲第 1 个落地，经 162.159.198.1:443 接入。
+# 节点名 "欧洲1@198.1-443" = 欧洲第 1 个落地，经 WARP-198.1-443(即 162.159.198.1:443)接入。
 #
 # 接入点 {len(entries)} 个 x 落地 {len(landings)} 个 = 组合 {combos} 个。
 # 任一接入点被墙或任一落地失效，其他组合仍可用。

@@ -43,6 +43,17 @@ const RULESETS = [
 function entryName(ip, port) {
   if (ip.includes(":")) {
     const parts = ip.split(":");
+    return `WARP6-${parts[2]}-${parts[parts.length - 1]}-${port}`;
+  }
+  return `WARP-${ip.split(".").slice(2).join(".")}-${port}`;
+}
+
+// 套娃节点名里要展示的接入点标识：不带 WARP 前缀的旧格式。
+// 实际 WARP 节点(masque outbound)用 entryName 的带前缀名，dialer-proxy 指向它，
+// 两者拆开，用户才看得清哪条是真正的 WARP 节点。
+function entryShortName(ip, port) {
+  if (ip.includes(":")) {
+    const parts = ip.split(":");
     return `v6-${parts[2]}-${parts[parts.length - 1]}-${port}`;
   }
   return `${ip.split(".").slice(2).join(".")}-${port}`;
@@ -69,18 +80,20 @@ function masqueNode(name, ip, port, priv, pub, v4, v6, sni) {
 /** 生成全部 MASQUE 接入点。两种配置都用这批。 */
 function buildEntries(warp) {
   const { privateKey: priv, peerPublicKey: pub, ipv4: v4, ipv6: v6 } = warp;
-  const entries = [], proxies = [];
+  const entries = [], proxies = [], shorts = [];
   for (const ip of [...V4, ...V6]) {
     for (const port of PORTS) {
       const n = entryName(ip, port);
       entries.push(n);
+      shorts.push(entryShortName(ip, port));
       proxies.push(masqueNode(n, ip, port, priv, pub, v4, v6));
     }
   }
-  entries.push("官方域名");
-  proxies.push(masqueNode("官方域名", SNI_NODE[0], SNI_NODE[1],
+  entries.push("WARP-官方域名");
+  shorts.push("官方域名");
+  proxies.push(masqueNode("WARP-官方域名", SNI_NODE[0], SNI_NODE[1],
                           priv, pub, v4, v6, OFFICIAL_SNI));
-  return { entries, proxies };
+  return { entries, shorts, proxies };
 }
 
 const q = (a, n = 6) => a.map((x) => " ".repeat(n) + `- "${x}"`).join("\n");
@@ -252,18 +265,18 @@ ${p(picks)}
 }
 
 export function buildConfig(warp, opera) {
-  const { entries, proxies } = buildEntries(warp);
+  const { entries, shorts, proxies } = buildEntries(warp);
 
   // 笛卡尔积：任一接入点或任一落地失效，其他组合仍可用
   const byLoc = {};
   for (const land of opera.landings) {
-    for (const ent of entries) {
-      const name = `${land.tag}@${ent}`;
+    for (let i = 0; i < entries.length; i++) {
+      const name = `${land.tag}@${shorts[i]}`;
       (byLoc[land.loc] ||= []).push(name);
       proxies.push(
         `  - {name: "${name}", type: http, server: ${land.ip}, port: ${land.port}, ` +
         `username: ${opera.username}, password: ${opera.password}, tls: true, ` +
-        `sni: ${land.host}, skip-cert-verify: false, dialer-proxy: ${ent}}`);
+        `sni: ${land.host}, skip-cert-verify: false, dialer-proxy: ${entries[i]}}`);
     }
   }
   const combos = Object.values(byLoc).reduce((a, b) => a + b.length, 0);
@@ -292,7 +305,7 @@ ${q(tags)}`).join("\n\n");
 #   亚洲/欧洲/美洲线路  本机 -> MASQUE -> Opera 落地 -> 目标（能换出口国家）
 #   WARP直连            本机 -> MASQUE -> 目标（出口是 CF 自己的 IP，快）
 #
-# 节点名 "欧洲1@198.1-443" = 欧洲第 1 个落地，经 162.159.198.1:443 接入。
+# 节点名 "欧洲1@198.1-443" = 欧洲第 1 个落地，经 WARP-198.1-443(即 162.159.198.1:443)接入。
 #
 # 接入点 ${entries.length} 个 x 落地 ${opera.landings.length} 个 = 组合 ${combos} 个，
 # 外加 ${entries.length} 个直连接入点。任一环失效都有替代路径。
