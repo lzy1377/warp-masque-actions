@@ -330,9 +330,13 @@ ${p(picks)}
 export function buildConfig(warp, opera, proton, wind) {
   const { entries, shorts, proxies, v4Entries } = buildEntries(warp);
 
+  // Opera 只是增强项：拿不到落地（限速、API 变更、网络不通）时
+  // 不能把整份配置带塌，没有落地就只出 MASQUE 直连那批。
+  const landings = opera?.landings || [];
+
   // 笛卡尔积：任一接入点或任一落地失效，其他组合仍可用
   const byLoc = {};
-  for (const land of opera.landings) {
+  for (const land of landings) {
     for (let i = 0; i < entries.length; i++) {
       const name = `${land.tag}@${shorts[i]}`;
       (byLoc[land.loc] ||= []).push(name);
@@ -439,7 +443,7 @@ ${q(tags)}`).join("\n\n");
 #
 # 节点名 "欧洲1@198.1-443" = 欧洲第 1 个落地，经 WARP-198.1-443(即 162.159.198.1:443)接入。
 #
-# 接入点 ${entries.length} 个 x 落地 ${opera.landings.length} 个 = 组合 ${combos} 个，
+# 接入点 ${entries.length} 个 x 落地 ${landings.length} 个 = 组合 ${combos} 个，
 # 外加 ${entries.length} 个直连接入点${protonNames.length ? ` 和 ${protonNames.length} 个 Proton 落地` : ""}${windNames.length ? ` 和 ${windNames.length} 个 Windscribe 落地` : ""}。
 # 任一环失效都有替代路径。
 #
@@ -533,6 +537,6 @@ ${rules}
   - MATCH,🐟 漏网之鱼
 `;
 
-  return { yaml, entries: entries.length, landings: opera.landings.length,
+  return { yaml, entries: entries.length, landings: landings.length,
            combos, proton: protonNames.length, wind: windNames.length };
 }

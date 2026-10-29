@@ -184,5 +184,30 @@ t(`无悬空引用${dangling.length ? " (" + dangling.slice(0, 3) + ")" : ""}`, 
   t("AI服务 能选 WARP直连", ai.includes("WARP直连"));
 }
 
+// Opera 获取失败降级：没有任何落地时仍要产出可用的 WARP 直连配置
+{
+  const r4 = buildConfig(warp, { landings: [] });
+  const y = r4.yaml;
+  const gs4 = [...y.matchAll(/^  - name: (.+)$/gm)].map((m) => m[1]);
+
+  t("Opera 为空也生成配置", y.includes("proxies:") && gs4.includes("WARP直连"));
+  t("组合数为 0", r4.combos === 0 && r4.landings === 0);
+  t("没有地区线路组", !gs4.some((g) => g.endsWith("线路")));
+
+  const wg4 = y.split("  - name: WARP直连")[1].split("\n  - name:")[0];
+  const wm4 = [...wg4.matchAll(/^      - "([^"]+)"$/gm)].map((m) => m[1]);
+  t("WARP直连 仍是 57 个接入点", wm4.length === 57);
+  t("降级后没有组合节点", !y.includes("dialer-proxy:"));
+
+  // 悬空引用
+  const gsec4 = y.slice(y.indexOf("proxy-groups:"), y.indexOf("rule-providers:"));
+  const refs4 = [...gsec4.matchAll(/^      - "?([^"\n]+)"?$/gm)].map((m) => m[1].trim());
+  const names4 = [...y.matchAll(/^  - \{name: "([^"]+)"/gm)].map((m) => m[1]);
+  const ents4 = [...y.matchAll(/^  - name: (\S+)\n    type: masque$/gm)].map((m) => m[1]);
+  const def4 = new Set([...gs4, ...names4, ...ents4, "DIRECT", "REJECT"]);
+  const dang4 = [...new Set(refs4.filter((r) => !def4.has(r)))];
+  t(`降级配置无悬空引用${dang4.length ? " (" + dang4.slice(0, 3) + ")" : ""}`, dang4.length === 0);
+}
+
 console.log(`\n通过 ${pass} 失败 ${fail}`);
 if (fail) process.exit(1);

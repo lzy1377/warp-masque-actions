@@ -350,6 +350,7 @@ export function renderUI(state, host, sp, token, cred, pushToken, protonCred, wi
       ${row("上次更新", updated ? `${fmt(updated)}（${ago} 分钟前）` : "尚未生成",
              updated ? (ago > 250 ? "warn" : "ok") : "err")}
       ${row("凭据剩余", leftTxt, left === null ? "" : left <= 0 ? "warn" : "ok")}
+      ${s.operaErr ? row("Opera 凭据", "获取失败，当前只有 WARP 直连可用", "err") : ""}
       ${row("到期时间", fmt(exp))}
       ${row("密码更新于", cred && cred.updatedAt ? fmt(new Date(cred.updatedAt)) : "—")}
       ${row("WARP 设备", warp.deviceId ? warp.deviceId.slice(0, 8) + "…" : "—")}

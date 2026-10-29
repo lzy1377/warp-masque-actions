@@ -86,10 +86,19 @@ async function getWind(env) {
   return await fetchWindscribe(acc);
 }
 
-/** 重建配置。WARP 复用，Opera 每次重取（凭据会过期）。 */
+/** 重建配置。WARP 复用，Opera 每次重取（凭据会过期）。
+ *
+ * Opera 是增强项不是前提：它挂了（限速、API 变更、网络不通）也要能出
+ * WARP 直连那份，否则一次失败就让整份订阅 503。错误记进 state 供排查。
+ */
 async function rebuild(env, { forceWarp = false } = {}) {
   const warp = await getWarp(env, forceWarp);
-  const opera = await fetchOpera();
+  let opera = null, operaErr = null;
+  try {
+    opera = await fetchOpera();
+  } catch (e) {
+    operaErr = e.message;
+  }
   // Proton 凭据是流水线推来的，没有就跳过，不影响其他线路
   let proton = null;
   const pc = await env.KV.get(K_PROTON, "json");
@@ -113,10 +122,11 @@ async function rebuild(env, { forceWarp = false } = {}) {
     stats: {
       entries, landings, combos,
       // 各请求码 discover 成功/数量（0 = 该区失败），排查"某区没产出 IP"用
-      ...(opera.perRegion || {}),
+      ...(opera?.perRegion || {}),
       proton: pn || 0, wind: wn || 0,
     },
     protonExpiresAt: proton ? proton.expiresAt : null,
+    operaErr,
     wind: wind ? { userId: wind.account.userId, servers: wn || 0 } : null,
     windErr,
     warp: {
@@ -409,7 +419,10 @@ export default {
     if (path === "/api/refresh" && req.method === "POST") {
       try {
         const s = await rebuild(env);
-        return json({ ok: true, msg: `已刷新，${s.stats.combos} 个组合` });
+        // Opera 失败时配置已降级成 WARP 直连，别只报"0 个组合"让人以为坏了
+        const note = s.operaErr
+          ? `；Opera 获取失败，当前只有 WARP 直连：${s.operaErr}` : "";
+        return json({ ok: true, msg: `已刷新，${s.stats.combos} 个组合${note}` });
       } catch (e) {
         return json({ ok: false, error: e.message }, 500);
       }

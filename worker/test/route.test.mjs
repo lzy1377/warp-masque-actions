@@ -330,5 +330,38 @@ t("新密码能登上",
   t("清除 wind 不动 Proton", !!kv.get("proton:cred"));
 }
 
+// ---- Opera 挂了也照样出 WARP 直连配置 ----
+{
+  reset();
+  await worker.fetch(post("/api/setup", { password: PW, confirm: PW }), env);
+  const c7 = (await worker.fetch(post("/login", { password: PW }), env))
+    .headers.get("set-cookie").split(";")[0];
+  const a7 = { cookie: c7 };
+  const tk = ((await (await worker.fetch(req("/", { headers: a7 }), env)).text())
+    .match(/token=([\w.\-]+)/) || [])[1];
+
+  // 预置 WARP 设备，重建时只剩 Opera 这一步会联网
+  kv.set("warp:device", JSON.stringify({
+    deviceId: "dev-1", privateKey: "PRIV", peerPublicKey: "PUB",
+    ipv4: "172.16.0.2", ipv6: "2606:4700:110::1",
+    registeredAt: new Date().toISOString(),
+  }));
+
+  const real = globalThis.fetch;
+  globalThis.fetch = async () => { throw new Error("opera down"); };
+  const r = await worker.fetch(req(`/sub?token=${tk}`), env);
+  const body = await r.text();
+  globalThis.fetch = real;
+
+  t("Opera 失败时订阅仍 200", r.status === 200);
+  t("降级配置含 WARP直连", body.includes("WARP直连"));
+  t("降级配置含全部 57 个接入点", (body.match(/type: masque/g) || []).length === 57);
+  t("降级配置已写入 KV", (kv.get("config:yaml") || "").includes("WARP直连"));
+
+  const st = JSON.parse(kv.get("state:meta") || "{}");
+  t("state 记录了 Opera 错误", (st.operaErr || "").includes("opera down"));
+  t("state 的落地数为 0", !!(st.stats && st.stats.landings === 0));
+}
+
 console.log(`\n通过 ${pass} 失败 ${fail}`);
 if (fail) process.exit(1);

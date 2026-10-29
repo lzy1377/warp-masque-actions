@@ -786,8 +786,9 @@ ${p(picks)}
 }
 function buildConfig(warp, opera, proton, wind) {
   const { entries, shorts, proxies, v4Entries } = buildEntries(warp);
+  const landings = opera?.landings || [];
   const byLoc = {};
-  for (const land of opera.landings) {
+  for (const land of landings) {
     for (let i = 0; i < entries.length; i++) {
       const name = `${land.tag}@${shorts[i]}`;
       (byLoc[land.loc] ||= []).push(name);
@@ -871,7 +872,7 @@ ${q(tags)}`).join("\n\n");
 #
 # \u8282\u70B9\u540D "\u6B27\u6D321@198.1-443" = \u6B27\u6D32\u7B2C 1 \u4E2A\u843D\u5730\uFF0C\u7ECF WARP-198.1-443(\u5373 162.159.198.1:443)\u63A5\u5165\u3002
 #
-# \u63A5\u5165\u70B9 ${entries.length} \u4E2A x \u843D\u5730 ${opera.landings.length} \u4E2A = \u7EC4\u5408 ${combos} \u4E2A\uFF0C
+# \u63A5\u5165\u70B9 ${entries.length} \u4E2A x \u843D\u5730 ${landings.length} \u4E2A = \u7EC4\u5408 ${combos} \u4E2A\uFF0C
 # \u5916\u52A0 ${entries.length} \u4E2A\u76F4\u8FDE\u63A5\u5165\u70B9${protonNames.length ? ` \u548C ${protonNames.length} \u4E2A Proton \u843D\u5730` : ""}${windNames.length ? ` \u548C ${windNames.length} \u4E2A Windscribe \u843D\u5730` : ""}\u3002
 # \u4EFB\u4E00\u73AF\u5931\u6548\u90FD\u6709\u66FF\u4EE3\u8DEF\u5F84\u3002
 #
@@ -967,7 +968,7 @@ ${rules}
   return {
     yaml,
     entries: entries.length,
-    landings: opera.landings.length,
+    landings: landings.length,
     combos,
     proton: protonNames.length,
     wind: windNames.length
@@ -1430,6 +1431,7 @@ function renderUI(state, host, sp, token, cred, pushToken, protonCred, windUsage
     updated ? ago > 250 ? "warn" : "ok" : "err"
   )}
       ${row("\u51ED\u636E\u5269\u4F59", leftTxt, left === null ? "" : left <= 0 ? "warn" : "ok")}
+      ${s.operaErr ? row("Opera \u51ED\u636E", "\u83B7\u53D6\u5931\u8D25\uFF0C\u5F53\u524D\u53EA\u6709 WARP \u76F4\u8FDE\u53EF\u7528", "err") : ""}
       ${row("\u5230\u671F\u65F6\u95F4", fmt(exp))}
       ${row("\u5BC6\u7801\u66F4\u65B0\u4E8E", cred && cred.updatedAt ? fmt(new Date(cred.updatedAt)) : "\u2014")}
       ${row("WARP \u8BBE\u5907", warp.deviceId ? warp.deviceId.slice(0, 8) + "\u2026" : "\u2014")}
@@ -1738,7 +1740,12 @@ async function getWind(env) {
 }
 async function rebuild(env, { forceWarp = false } = {}) {
   const warp = await getWarp(env, forceWarp);
-  const opera = await fetchOpera();
+  let opera = null, operaErr = null;
+  try {
+    opera = await fetchOpera();
+  } catch (e) {
+    operaErr = e.message;
+  }
   let proton = null;
   const pc = await env.KV.get(K_PROTON, "json");
   if (pc && (!pc.expiresAt || pc.expiresAt * 1e3 > Date.now())) proton = pc;
@@ -1758,11 +1765,12 @@ async function rebuild(env, { forceWarp = false } = {}) {
       landings,
       combos,
       // 各请求码 discover 成功/数量（0 = 该区失败），排查"某区没产出 IP"用
-      ...opera.perRegion || {},
+      ...opera?.perRegion || {},
       proton: pn || 0,
       wind: wn || 0
     },
     protonExpiresAt: proton ? proton.expiresAt : null,
+    operaErr,
     wind: wind ? { userId: wind.account.userId, servers: wn || 0 } : null,
     windErr,
     warp: {
@@ -2011,7 +2019,8 @@ var index_default = {
     if (path === "/api/refresh" && req.method === "POST") {
       try {
         const s = await rebuild(env);
-        return json({ ok: true, msg: `\u5DF2\u5237\u65B0\uFF0C${s.stats.combos} \u4E2A\u7EC4\u5408` });
+        const note = s.operaErr ? `\uFF1BOpera \u83B7\u53D6\u5931\u8D25\uFF0C\u5F53\u524D\u53EA\u6709 WARP \u76F4\u8FDE\uFF1A${s.operaErr}` : "";
+        return json({ ok: true, msg: `\u5DF2\u5237\u65B0\uFF0C${s.stats.combos} \u4E2A\u7EC4\u5408${note}` });
       } catch (e) {
         return json({ ok: false, error: e.message }, 500);
       }
